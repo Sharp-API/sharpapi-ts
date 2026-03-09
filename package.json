@@ -1,0 +1,56 @@
+{
+  "name": "@sharpapi/client",
+  "version": "0.1.0",
+  "description": "Official TypeScript/JavaScript client for the SharpAPI real-time sports betting odds API",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "files": ["dist"],
+  "sideEffects": false,
+  "license": "MIT",
+  "author": "SharpAPI <support@sharpapi.io>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Sharp-API/sharpapi-ts"
+  },
+  "homepage": "https://sharpapi.io",
+  "bugs": "https://github.com/Sharp-API/sharpapi-ts/issues",
+  "keywords": [
+    "sports-betting",
+    "odds",
+    "arbitrage",
+    "ev",
+    "expected-value",
+    "api",
+    "real-time",
+    "sse",
+    "websocket",
+    "pinnacle",
+    "sportsbook"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0",
+    "vitest": "^3.0.0"
+  }
+}
