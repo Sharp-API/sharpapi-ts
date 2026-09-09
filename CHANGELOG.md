@@ -4,6 +4,32 @@ All notable changes to `@sharp-api/client` are documented here.
 
 ## 0.4.3 — Unreleased
 
+### Added — typed surfaces for /players, /prediction-markets, /settlements and /parlay/price
+
+- Four new resources on `SharpAPI`: `players` (list + by-id),
+  `predictionMarkets` (list, by-id, `categories()`), `settlements` (graded
+  outcomes by `hash_id`/`game_id`) and `parlay.price(sportsbook, legs)`
+  (modeled combined price).
+- Interfaces for each: `Player`, `PredictionMarket` (+
+  `PredictionMarketOutcome`, `PredictionMarketPrice`,
+  `PredictionMarketSourceIDs`, `PredictionMarketCategory`,
+  `PredictionMarketCategoryBook`), `Settlement`, `SettlementsPage`,
+  `SettlementsResponse`, `ParlayPriceResult` (+ `ParlayLeg`, `ParlayModel`,
+  `ParlayModelPrice`, `ParlayLegRequest`), plus the params types
+  `PlayersParams`, `PredictionMarketsParams`, `SettlementsParams`.
+- `PaginatedResponse<T>` and `Pagination` describe the TOP-LEVEL `pagination`
+  block the list surfaces actually send — `APIResponse.meta.pagination` alone
+  reads back `undefined` there.
+- Every new interface is snake_case, matching the wire; the drift ratchet in
+  `tests/new-surfaces.test.ts` holds them at zero declared-but-unsent fields.
+
+### Added — parlay error codes
+
+- `APIErrorCode` and `API_ERROR_CODES` gain `correlation_unsupported`,
+  `too_few_legs`, `too_many_legs`, `unknown_leg` and `ambiguous_leg`.
+  (`service_unavailable`, which `/settlements` returns on a degraded grading
+  store, was already present and is unchanged.)
+
 ### Security
 
 - Authenticated REST requests now reject redirects, preventing credentials and request bodies from being forwarded to another origin.
