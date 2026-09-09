@@ -111,8 +111,12 @@ export interface APIResponse<T> {
  *                          endpoints is invalid or expired.
  */
 export type APIErrorCode =
+  // Parlay pricing rejections — POST /parlay/price answers 400 with one of
+  // these when a slip cannot be priced. See {@link ParlayModel.reason}.
+  | 'ambiguous_leg'
   | 'backpressure'
   | 'concurrent_request_cap'
+  | 'correlation_unsupported'
   | 'disabled_api_key'
   | 'expired_api_key'
   | 'gone'
@@ -127,9 +131,12 @@ export type APIErrorCode =
   | 'rate_limited'
   | 'service_unavailable'
   | 'tier_restricted'
+  | 'too_few_legs'
+  | 'too_many_legs'
   | 'too_many_streams'
   | 'unauthorized'
   | 'unknown_endpoint'
+  | 'unknown_leg'
   | 'upstream_error'
   | 'validation_error'
 
@@ -152,8 +159,10 @@ export type WSErrorCode =
  * switch statements and runtime validation (e.g. `code in API_ERROR_CODES`).
  */
 export const API_ERROR_CODES: Record<APIErrorCode, APIErrorCode> = {
+  ambiguous_leg: 'ambiguous_leg',
   backpressure: 'backpressure',
   concurrent_request_cap: 'concurrent_request_cap',
+  correlation_unsupported: 'correlation_unsupported',
   disabled_api_key: 'disabled_api_key',
   expired_api_key: 'expired_api_key',
   gone: 'gone',
@@ -168,9 +177,12 @@ export const API_ERROR_CODES: Record<APIErrorCode, APIErrorCode> = {
   rate_limited: 'rate_limited',
   service_unavailable: 'service_unavailable',
   tier_restricted: 'tier_restricted',
+  too_few_legs: 'too_few_legs',
+  too_many_legs: 'too_many_legs',
   too_many_streams: 'too_many_streams',
   unauthorized: 'unauthorized',
   unknown_endpoint: 'unknown_endpoint',
+  unknown_leg: 'unknown_leg',
   upstream_error: 'upstream_error',
   validation_error: 'validation_error',
 } as const
@@ -757,6 +769,283 @@ export interface StreamParams {
   add_sportsbook?: string | string[]
   league?: string | string[]
   eventId?: string
+}
+
+// =============================================================================
+// Players / Prediction Markets / Settlements / Parlay
+// =============================================================================
+
+/** Top-level paging block sent by the list surfaces. */
+export interface Pagination {
+  limit: number
+  offset: number
+  count: number
+  total?: number | null
+  has_more: boolean
+  next_offset?: number | null
+}
+
+/**
+ * A list response whose paging block rides at the TOP LEVEL rather than under
+ * `meta` — the shape `/players` and `/prediction-markets` actually send.
+ */
+export interface PaginatedResponse<T> extends APIResponse<T> {
+  pagination?: Pagination
+  /** Store freshness stamp, on the surfaces that send one. */
+  updated_at?: string
+}
+
+/**
+ * A row from the `/players` catalog. These seven fields are the whole v1
+ * contract; the server deliberately exposes no third-party identifiers here.
+ */
+export interface Player {
+  id: string
+  display_name: string
+  /** Omitted (not null) when the catalog has no split name. */
+  first_name?: string
+  last_name?: string
+  sport: string
+  /** Always an array — `[]`, never null, for an unattributed player. */
+  leagues: string[]
+  team_id?: string
+}
+
+export interface PlayersParams {
+  sport?: string
+  league?: string
+  team_id?: string
+  /** Substring match over the player's display name. */
+  search?: string
+  limit?: number
+  offset?: number
+}
+
+/** A prediction-market outcome price in all three formats. */
+export interface PredictionMarketPrice {
+  probability: number
+  american: number
+  decimal: number
+}
+
+/** One outcome (contract side) of a prediction market. */
+export interface PredictionMarketOutcome {
+  label: string
+  price: PredictionMarketPrice
+  /** Exchange-native selection id, when the book publishes one. */
+  selection_id?: string
+  /** Polymarket CLOB token id, per outcome. */
+  token_id?: string
+  /** Sent as an explicit `null` when no quote is resting — never omitted. */
+  bid: number | null
+  ask: number | null
+  last: number | null
+}
+
+/** The exchange's own identifiers for a market, namespaced by book. */
+export interface PredictionMarketSourceIDs {
+  market_id: string
+  event_id?: string
+  condition_id?: string
+  tick_size?: number
+  neg_risk?: boolean
+  min_order_size?: number
+}
+
+/** A market from `/prediction-markets`. */
+export interface PredictionMarket {
+  /** Ours: `<book>:<native market key>`. */
+  market_id: string
+  sportsbook: string
+  question: string
+  category: string
+  sport: string
+  league: string
+  outcomes: PredictionMarketOutcome[]
+  source_ids: PredictionMarketSourceIDs
+  is_live: boolean
+  timestamp: string
+  /**
+   * The canonical sports event id, for joining to `/odds`, `/events` and the
+   * EV surfaces. ALWAYS `null` on futures / question contracts — their
+   * per-book synthetic ids are not stable and are never offered as join keys.
+   */
+  linked_event_id: string | null
+  /** The exchange's own grouping id, namespaced by book. */
+  pm_event_id?: string
+  volume?: number
+  volume_24h?: number
+  open_interest?: number
+  event_start_time?: string
+  sportsbook_ref?: EntityRef
+  sport_ref?: SportRef
+  league_ref?: EntityRef
+}
+
+/** One book's contribution to a prediction-market category count. */
+export interface PredictionMarketCategoryBook {
+  id: string
+  market_count: number
+}
+
+/** A row from `/prediction-markets/categories`. */
+export interface PredictionMarketCategory {
+  id: string
+  label: string
+  market_count: number
+  books: PredictionMarketCategoryBook[]
+}
+
+export interface PredictionMarketsParams {
+  category?: string
+  sport?: string
+  league?: string
+  event_id?: string
+  sportsbook?: string | string[]
+  /** Substring match over the market question. */
+  q?: string
+  limit?: number
+  offset?: number
+}
+
+/**
+ * A graded selection from `/settlements`. Field names mirror
+ * `/opportunities/ev` so a pick joins to its grade without a translation
+ * table. Outcomes only — no odds, EV%, stake math, or ROI.
+ */
+export interface Settlement {
+  game_id: string
+  sport: string
+  league: string
+  home_team: string
+  away_team: string
+  market_type: string
+  selection: string
+  selection_type: string
+  /** `"won"` | `"lost"` | `"push"` — voids are reported as push. */
+  outcome: string
+  /** RFC3339 UTC; never earlier than the server's grading cutoff. */
+  graded_at: string
+  /**
+   * Present only on a `hash_id` lookup: an event listing collapses per-book
+   * capture rows into one row per selection, which no single hash describes.
+   */
+  hash_id?: string
+  line?: number
+  player_name?: string
+  player_id?: string
+  stat_category?: string
+  event_start_time?: string
+}
+
+/**
+ * The `data` object of a `/settlements` response. Unlike the list surfaces,
+ * `data` here is an object: paging state rides beside the rows, and
+ * `next_offset` advances by rows EXAMINED, not rows returned.
+ */
+export interface SettlementsPage {
+  settlements: Settlement[]
+  total_settlements: number
+  truncated: boolean
+  next_offset: number | null
+}
+
+export interface SettlementsMeta {
+  source?: string
+  filters?: Record<string, string | null>
+  limit?: number
+  offset?: number
+  /** Earliest servable grade date — grades before it are excluded by contract. */
+  grading_cutoff?: string
+  updated_at?: string
+}
+
+export interface SettlementsResponse {
+  success?: boolean
+  data: SettlementsPage
+  meta?: SettlementsMeta
+}
+
+export interface SettlementsParams {
+  /** A selection id as issued on `/opportunities/ev`. */
+  hash_id?: string
+  /** An event key as issued on `/opportunities/ev`. */
+  game_id?: string
+  market_type?: string
+  selection?: string
+  player_id?: string
+  /** 1..500, default 100. */
+  limit?: number
+  /** 0..2000. */
+  offset?: number
+}
+
+/** One leg of a parlay slip, as sent to `POST /parlay/price`. */
+export interface ParlayLegRequest {
+  event_id: string
+  market_type: string
+  selection: string
+  selection_type?: string
+  line?: number | null
+  market_segment?: string
+  player_name?: string
+  player_id?: string
+}
+
+/** One resolved leg echoed back, at the book's quoted single-leg price. */
+export interface ParlayLeg {
+  index: number
+  event_id: string
+  sportsbook: string
+  market_type: string
+  selection: string
+  odds_american: number
+  odds_decimal: number
+  implied_probability: number
+  is_live: boolean
+  is_active: boolean
+  timestamp: string
+  market_segment?: string
+  selection_type?: string
+  /** Sent as an explicit `null` on a moneyline leg — never omitted. */
+  line: number | null
+  player_name?: string
+}
+
+/** The modeled combined price. NOT a sportsbook parlay quote. */
+export interface ParlayModelPrice {
+  odds_american: number
+  odds_decimal: number
+  implied_probability: number
+}
+
+/** The `parlay` block of a `POST /parlay/price` response. */
+export interface ParlayModel {
+  source: string
+  method: string
+  model_version: string
+  leg_count: number
+  /**
+   * Always present, and always states that the combined price is a SharpAPI
+   * model output rather than a book's parlay quote.
+   */
+  note: string
+  /**
+   * `null` — not omitted — whenever the slip could not be priced. Read
+   * `reason` (and `conflicting_legs`) to see why.
+   */
+  price: ParlayModelPrice | null
+  reason?: string
+  /** Index pairs of legs that cannot co-occur, on a rejected slip. */
+  conflicting_legs?: [number, number][]
+}
+
+/** The `data` object of a `POST /parlay/price` response. */
+export interface ParlayPriceResult {
+  sportsbook: string
+  legs: ParlayLeg[]
+  parlay: ParlayModel
+  warnings?: string[]
 }
 
 // =============================================================================
@@ -1523,6 +1812,89 @@ class GameStateResource {
   }
 }
 
+class PlayersResource {
+  constructor(private http: HttpClient) {}
+
+  /** List players, optionally filtered by sport / league / team / name. */
+  async list(params?: PlayersParams): Promise<PaginatedResponse<Player[]>> {
+    return this.http.get('/api/v1/players', params as Record<string, unknown>)
+  }
+
+  /** Get one player by our canonical id, e.g. `baseball_mlb_...`. */
+  async get(playerId: string): Promise<APIResponse<Player>> {
+    return this.http.get(`/api/v1/players/${encodeURIComponent(playerId)}`)
+  }
+}
+
+class PredictionMarketsResource {
+  constructor(private http: HttpClient) {}
+
+  /** List prediction markets. */
+  async list(
+    params?: PredictionMarketsParams,
+  ): Promise<PaginatedResponse<PredictionMarket[]>> {
+    return this.http.get(
+      '/api/v1/prediction-markets',
+      params as Record<string, unknown>,
+    )
+  }
+
+  /** Get one market by our `<book>:<native key>` id. */
+  async get(marketId: string): Promise<APIResponse<PredictionMarket>> {
+    return this.http.get(
+      `/api/v1/prediction-markets/${encodeURIComponent(marketId)}`,
+    )
+  }
+
+  /** List every category with its per-book market counts. */
+  async categories(): Promise<PaginatedResponse<PredictionMarketCategory[]>> {
+    return this.http.get('/api/v1/prediction-markets/categories')
+  }
+}
+
+class SettlementsResource {
+  constructor(private http: HttpClient) {}
+
+  /**
+   * Look up how selections settled.
+   *
+   * Exactly one of `hash_id` / `game_id` is required — the server rejects an
+   * unkeyed query with `validation_error` so every lookup stays indexed. A
+   * degraded grading store answers `service_unavailable` rather than an empty
+   * page, because "no rows" is itself a real answer on this surface.
+   */
+  async get(params: SettlementsParams): Promise<SettlementsResponse> {
+    return this.http.get(
+      '/api/v1/settlements',
+      params as Record<string, unknown>,
+    )
+  }
+}
+
+class ParlayResource {
+  constructor(private http: HttpClient) {}
+
+  /**
+   * Price a parlay slip from one book's quoted single-leg prices.
+   *
+   * The combined price is a SharpAPI model output computed under leg
+   * independence — NOT a sportsbook parlay quote. `parlay.note` says so on
+   * every response, and `parlay.price` is `null` whenever the slip could not
+   * be priced.
+   *
+   * Rejections arrive as HTTP 400 with `error.code` one of `too_few_legs`,
+   * `too_many_legs`, `unknown_leg` (a leg matched no live quote),
+   * `ambiguous_leg` (a leg matched more than one) or
+   * `correlation_unsupported` (the legs are correlated).
+   */
+  async price(
+    sportsbook: string,
+    legs: ParlayLegRequest[],
+  ): Promise<APIResponse<ParlayPriceResult>> {
+    return this.http.post('/api/v1/parlay/price', { sportsbook, legs })
+  }
+}
+
 class AccountResource {
   constructor(private http: HttpClient) {}
 
@@ -1722,6 +2094,14 @@ export class SharpAPI {
   readonly middles: MiddlesResource
   /** Game State endpoints — live scores/period/clock (Game State add-on or Enterprise) */
   readonly gamestate: GameStateResource
+  /** Player catalog — `/players` */
+  readonly players: PlayersResource
+  /** Prediction-market contracts — `/prediction-markets` */
+  readonly predictionMarkets: PredictionMarketsResource
+  /** Graded outcomes — `/settlements` */
+  readonly settlements: SettlementsResource
+  /** Modeled parlay pricing — `/parlay/price` */
+  readonly parlay: ParlayResource
   /** Account endpoints */
   readonly account: AccountResource
   /** API key management — `/api/v1/account/keys` CRUD. */
@@ -1741,6 +2121,10 @@ export class SharpAPI {
     this.ev = new EVResource(this.http)
     this.middles = new MiddlesResource(this.http)
     this.gamestate = new GameStateResource(this.http)
+    this.players = new PlayersResource(this.http)
+    this.predictionMarkets = new PredictionMarketsResource(this.http)
+    this.settlements = new SettlementsResource(this.http)
+    this.parlay = new ParlayResource(this.http)
     this.account = new AccountResource(this.http)
     this.keys = new KeysResource(this.http)
     this.stream = new StreamResource(this.http)

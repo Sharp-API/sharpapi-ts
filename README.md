@@ -50,6 +50,10 @@ Try the [odds-comparison app](examples/odds-comparison/): compare DraftKings and
 | `api.ev` | `get(params?)` | Pro+ |
 | `api.arbitrage` | `get(params?)`, `csv(params?)` | Hobby+ |
 | `api.middles` | `get(params?)` | Pro+ |
+| `api.players` | `list(params?)`, `get(id)` | All |
+| `api.predictionMarkets` | `list(params?)`, `get(id)`, `categories()` | `prediction_markets` feature |
+| `api.settlements` | `get(params)` | `settlement` feature |
+| `api.parlay` | `price(sportsbook, legs)` | `parlay` feature |
 | `api.account` | `me()`, `usage()` | All |
 | `api.stream` | `odds(params?)`, `opportunities(params?)`, `all(params?)`, `event(id)`, `oddsWs(params?)` | WebSocket add-on |
 
